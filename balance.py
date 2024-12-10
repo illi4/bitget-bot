@@ -13,9 +13,16 @@ CONFIG = {
 }
 
 # API credentials from environment variables
-ACCESS_KEY = os.environ.get('ACCESS_KEY')
-SECRET_KEY = os.environ.get('SECRET_KEY')
-PASSPHRASE = os.environ.get('PASSPHRASE')
+creds = dict(
+    bangbox=dict(ACCESS_KEY = os.environ.get('ACCESS_KEY_BBOX'),
+                 SECRET_KEY = os.environ.get('SECRET_KEY_BBOX'),
+                 PASSPHRASE = os.environ.get('PASSPHRASE_BBOX')
+                 ),
+    mri=dict(ACCESS_KEY=os.environ.get('ACCESS_KEY_MRI'),
+                 SECRET_KEY=os.environ.get('SECRET_KEY_MRI'),
+                 PASSPHRASE=os.environ.get('PASSPHRASE_MRI')
+                 ),
+)
 
 # API endpoint
 BASE_URL = 'https://api.bitget.com'
@@ -24,13 +31,13 @@ ENDPOINT = '/api/v2/mix/account/accounts'
 def get_timestamp():
     return str(int(time.time() * 1000))
 
-def generate_signature(timestamp, method, request_path, body):
+def generate_signature(timestamp, method, request_path, body, secret_key):
     message = timestamp + method.upper() + request_path + (body or '')
-    mac = hmac.new(bytes(SECRET_KEY, encoding='utf8'), bytes(message, encoding='utf-8'), digestmod='sha256')
+    mac = hmac.new(bytes(secret_key, encoding='utf8'), bytes(message, encoding='utf-8'), digestmod='sha256')
     d = mac.digest()
     return base64.b64encode(d).decode()
 
-def api_request(method, endpoint, params=None):
+def api_request(method, endpoint, access_key, passphrase, secret_key, params=None):
     timestamp = get_timestamp()
 
     request_path = endpoint
@@ -40,13 +47,13 @@ def api_request(method, endpoint, params=None):
 
     body = json.dumps(params) if method == 'POST' else ''
 
-    signature = generate_signature(timestamp, method, request_path, body)
+    signature = generate_signature(timestamp, method, request_path, body, secret_key)
 
     headers = {
-        'ACCESS-KEY': ACCESS_KEY,
+        'ACCESS-KEY': access_key,
         'ACCESS-SIGN': signature,
         'ACCESS-TIMESTAMP': timestamp,
-        'ACCESS-PASSPHRASE': PASSPHRASE,
+        'ACCESS-PASSPHRASE': passphrase,
         'Content-Type': 'application/json'
     }
 
@@ -56,12 +63,17 @@ def api_request(method, endpoint, params=None):
     return response
 
 def main():
-    try:
-        params = {
-            'productType': CONFIG['PRODUCT_TYPE']
-        }
+    params = {
+        'productType': CONFIG['PRODUCT_TYPE']
+    }
 
-        response = api_request('GET', ENDPOINT, params)
+    for key_name, cred_values in creds.items():
+
+        response = api_request('GET', ENDPOINT,
+                               cred_values['ACCESS_KEY'],
+                               cred_values['PASSPHRASE'],
+                               cred_values['SECRET_KEY'],
+                               params)
 
         if response.status_code == 200:
             data = response.json()
@@ -69,13 +81,16 @@ def main():
                 btc_account = next((account for account in data['data'] if account['marginCoin'] == CONFIG['MARGIN_COIN']), None)
 
                 if btc_account:
-                    print(f"Account Information for {CONFIG['PRODUCT_TYPE']} with Margin Coin {CONFIG['MARGIN_COIN']}:")
-                    print(f"Available Balance: {btc_account['available']} BTC")
+                    print(f"{key_name.upper()}: {btc_account['available']} BTC")
+                    '''
+                    print(f"####### {key_name.upper()} account #######")
+                    print(f"{btc_account['available']} BTC available balance")
                     print(f"Total Equity: {btc_account['accountEquity']} BTC")
                     print(f"Unrealized PNL: {btc_account['unrealizedPL']} BTC")
                     print(f"Max Transferable: {btc_account['maxTransferOut']} BTC")
                     print(f"Equity in USDT: {btc_account['usdtEquity']} USDT")
                     print(f"Equity in BTC: {btc_account['btcEquity']} BTC")
+                    '''
                 else:
                     print(f"No account found with Margin Coin {CONFIG['MARGIN_COIN']}")
             else:
@@ -83,9 +98,6 @@ def main():
         else:
             print(f"API request failed with status code: {response.status_code}")
             print(f"Response Content: {response.text}")
-
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
 
 if __name__ == "__main__":
     main()
